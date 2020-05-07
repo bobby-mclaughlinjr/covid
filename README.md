@@ -1,1 +1,1 @@
-# Fitting SEIR models to actual regional cases & calculating real-time Rt
+# Fitting SEIR models to regional cases & calculating real-time Rt
