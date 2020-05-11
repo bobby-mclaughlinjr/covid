@@ -24,11 +24,13 @@ OUR_WORLD_IN_DATA_URL = 'https://raw.githubusercontent.com/owid/covid-19-data/ma
 OUR_WORLD_IN_DATA_COLUMNS = {'Date': 'date', 'Entity': 'region', 'Cumulative total': 'tests', 'Daily change in cumulative total': 'new'
                              , 'Cumulative total per thousand': 'tests_per_thousand', 'Daily change in cumulative total per thousand': 'new_per_thousand'}
 
-FILTERED_REGIONS = ['US', 'Spain', 'Italy', 'France', 'Germany', 'United Kingdom', 'Sweden', 'South Korea', 'Japan', 'Singapore'
+FILTERED_REGIONS = ['United States', 'Spain', 'Italy', 'France', 'Germany', 'United Kingdom', 'Sweden', 'South Korea', 'Japan', 'Singapore'
                    , 'Denmark', 'Australia', 'California - US', 'Florida - US', 'Georgia - US', 'Illinois - US', 'Louisiana - US'
                    , 'Massachusetts - US', 'Michigan - US', 'New York - US', 'New Jersey - US', 'Pennsylvania - US', 'Texas - US']
 
 US_STATE_SUFFIX = ' - US'
+
+COMMON_NAME_DICT = {'US': 'United States'}
 
 
 def smooth_diff(X, window=None, diff=None):
@@ -102,10 +104,32 @@ class Covid(object):
 
     @cases.setter
     def cases(self, value):
-        if self.single & (value is not None):
-            value.reset_index(level=0, drop=True, inplace=True)
+        self._cases = self.format_series(value)
 
-        self._cases = value
+    @property
+    def tests(self):
+        return self._tests
+
+    @tests.setter
+    def tests(self, value):
+        self._tests = self.format_series(value)
+
+    @staticmethod
+    def rename_region(X):
+        if X is not None:
+            X.index = X.index.set_levels([COMMON_NAME_DICT.get(region, region) for region in X.index.levels[0]], 'region')
+        return X
+
+    def format_series(self, X):
+        X = self.rename_region(X)
+
+        if X is not None:
+            X = X.loc[self.regions, :].sort_index()
+
+            if self.single:
+                X.reset_index(level=0, drop=True, inplace=True)
+
+        return X
 
     @staticmethod
     def get_csse():
@@ -172,7 +196,7 @@ class Covid(object):
         return X.append(add_series).sort_index()
 
     def get_cases(self, outbreak_shift=None, smooth=None, diff=None):
-        data = pd.concat([self.get_csse(), self.get_nyt(), self.get_nyc()]).loc[self.regions, :].sort_index()
+        data = pd.concat([self.get_csse(), self.get_nyt(), self.get_nyc()])
 
         if outbreak_shift is not None:
             data = data.groupby(level=0).apply(self.outbreak_shift, n=outbreak_shift)
@@ -183,5 +207,15 @@ class Covid(object):
         return self
 
     def get_tests(self, per_population=False):
-        self.tests = pd.concat([self.get_ourworld(per_population), self.get_covid_tracking(per_population)]).loc[self.regions, :].sort_index()
+        self.tests = pd.concat([self.get_ourworld(per_population), self.get_covid_tracking(per_population)])
         return self
+
+    def cases_to_tests(self):
+        if self.cases is None: self.get_cases()
+        if self.tests is None: self.get_tests()
+
+        results = pd.DataFrame(self.cases).merge(self.tests, how='left', left_index=True, right_index=True)
+        results['cases_to_tests_ratio'] = results['cases'] / results['tests']
+        results.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+        return results['cases_to_tests_ratio']
